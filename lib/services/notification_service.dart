@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -23,16 +22,39 @@ class NotificationService {
 
   static const int dailySummaryId = 1;
 
+  /// Picks the IANA zone matching the device's current UTC offset and
+  /// abbreviation (no native plugin needed). Falls back to UTC.
+  static void _configureLocalTimezone() {
+    tzdata.initializeTimeZones();
+    final now = DateTime.now();
+    final offset = now.timeZoneOffset;
+    final abbr = now.timeZoneName;
+    tz.Location? exact;
+    tz.Location? sameOffset;
+    for (final loc in tz.timeZoneDatabase.locations.values) {
+      if (loc.name.startsWith('Etc/') || loc.name.startsWith('Antarctica/')) {
+        continue;
+      }
+      final t = tz.TZDateTime.from(now, loc);
+      if (t.timeZoneOffset != offset) continue;
+      if (t.timeZoneName == abbr) {
+        exact = loc;
+        break;
+      }
+      sameOffset ??= loc;
+    }
+    final chosen = exact ?? sameOffset;
+    if (chosen == null) {
+      debugPrint('Timezone fallback to UTC (offset $offset)');
+      tz.setLocalLocation(tz.UTC);
+    } else {
+      tz.setLocalLocation(chosen);
+    }
+  }
+
   Future<void> init() async {
     if (_ready) return;
-    tzdata.initializeTimeZones();
-    try {
-      final info = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(info.identifier));
-    } catch (e) {
-      debugPrint('Timezone fallback to UTC: $e');
-      tz.setLocalLocation(tz.UTC);
-    }
+    _configureLocalTimezone();
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const ios = DarwinInitializationSettings(
       requestAlertPermission: false,
